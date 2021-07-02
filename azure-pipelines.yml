@@ -1,0 +1,126 @@
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - notebooks/*
+
+pool:
+  vmImage: 'Ubuntu 18.04'
+
+variables:
+- group: sample-variable-group
+- name: publishPath
+  value: 'dist'
+- name: feedName
+  value: 'Example_Feed'
+
+stages:
+  - stage: build_and_test
+    displayName: Build and Test
+    jobs:
+      - job:
+        displayName: Show Variables
+        steps:
+        - script: |
+            env | sort
+          displayName: 'Env..'
+
+      - job: 
+        displayName: Build and Test
+        strategy:
+          matrix:
+            Python37:
+              python.version: '3.8'
+            Python38:
+              python.version: '3.9'
+          maxParallel: 4
+        steps:
+        - task: UsePythonVersion@0
+          inputs:
+            versionSpec: '$(python.version)'
+          displayName: 'Set Python version to $(python.version)'
+        - task: DockerInstaller@0
+          inputs:
+            dockerVersion: '17.09.0-ce'
+
+        - script: |
+            python -m pip install -U pip
+            python -m pip install 'pytest==6.2.4' 'poetry==1.1.7'
+            poetry install --no-interaction
+          displayName: 'Install dependencies'
+
+        - script: |
+            poetry run python -m pytest tests/ -v --doctest-modules --junitxml=reports/test-results.xml
+          displayName: 'Run tests'
+
+        - task: PublishTestResults@2
+          condition: succeededOrFailed()
+          inputs:
+            testResultsFiles: '**/test-*.xml'
+            testRunTitle: 'Publish test results for Python $(python.version)'
+          displayName: 'Publish test results'
+ 
+        - bash: |
+            poetry build --format wheel
+
+            cd $(publishPath)
+            BUILT_ARTIFACT=$(find . -maxdepth 1 -type f -iname "*.whl" | head -1 | sed "s|^\./||")
+            PY_VER=${PYTHON_VERSION//.}
+            echo "##vso[task.setvariable variable=PY_VER]$PY_VER"
+            TAGGED_ARTIFACT=$(echo "$BUILT_ARTIFACT" | sed "s|-py3-|-$BUILD_BUILDNUMBER-py$PY_VER-|")
+            echo "##vso[task.setvariable variable=TAGGED_ARTIFACT]$TAGGED_ARTIFACT"
+            
+            echo "Tagging built artifact $BUILT_ARTIFACT with build number $BUILD_BUILDNUMBER => $TAGGED_ARTIFACT"
+            mv "$BUILT_ARTIFACT" "$(System.DefaultWorkingDirectory)/$(publishPath)/$TAGGED_ARTIFACT"
+          displayName: 'Run build'
+
+        - task: PublishPipelineArtifact@1
+          inputs:
+            path: "$(System.DefaultWorkingDirectory)/$(publishPath)/$(TAGGED_ARTIFACT)"
+            artifact: "sampleproject$(python.version)"
+          displayName: 'Upload build artifact'
+
+  - stage: publish
+    displayName: Publish
+    dependsOn: build_and_test
+    condition: and(succeeded('build_and_test'), eq(variables['Build.SourceBranchName'], 'main'))
+    jobs:
+      - job: 
+        strategy:
+          matrix:
+            Python37:
+              python.version: '3.8'
+            Python38:
+              python.version: '3.9'
+          maxParallel: 4
+        steps:
+        - task: UsePythonVersion@0
+          inputs:
+            versionSpec: '$(python.version)'
+          displayName: 'Set Python version to $(python.version)'
+
+        - script: |
+            python -m pip install -U pip
+            python -m pip install twine
+          displayName: 'Install dependencies for publishing'
+
+        - task: DownloadPipelineArtifact@2
+          inputs:
+            artifact: "sampleproject$(python.version)"
+            path: "$(Build.StagingDirectory)/$(publishPath)"
+          displayName: 'Download build artifact'
+
+        - script: |
+            find "$(Build.StagingDirectory)/$(publishPath)"
+          displayName: 'Display artifacts'
+
+        - task: TwineAuthenticate@1
+          inputs:
+            artifactFeed: '$(feedName)'
+          displayName: 'Generate feed credentials'
+
+        - script: |
+            twine upload -r "$(feedName)" --config-file $(PYPIRC_PATH) "$(Build.StagingDirectory)/$(publishPath)/*"
+          displayName: 'Publish'

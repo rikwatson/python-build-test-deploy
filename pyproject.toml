@@ -1,0 +1,41 @@
+# Example configuration for Black.
+
+# NOTE: you have to use single-quoted strings in TOML for regular expressions.
+# It's the equivalent of r-strings in Python.  Multiline strings are treated as
+# verbose regular expressions by Black.  Use [ ] to denote a significant space
+# character.
+
+[tool.black]
+line-length = 88
+target-version = ['py36', 'py37', 'py38']
+include = '\.pyi?$'
+exclude = '''
+/(
+  \.toml
+  |\.sh
+  |\.git
+  |\.ini
+  |Dockerfile
+  |Jenkinfile
+  # The following are specific to Black, you probably don't want those.
+  | blib2to3
+  | tests/data
+  | profiling
+)/
+'''
+
+[tool.poetry]
+name = "sampleproject"
+version = "0.1.2"
+description = "A sample project to show testing Python under a CI/CD system"
+authors = ["Rik Watson <rik.watson@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.7"
+pylint = "^2.9.2"
+flake8 = "^3.9.2"
+mypy = "^0.910"
+black = "^21.6b0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.3.4"
